@@ -14,10 +14,8 @@ def prereqTree(course):
                          "image_url": "https://seethefullpicture.ca/wp-content/uploads/2019/06/Alcon_SeeTheFullPicture_Website_1901x11252.jpg"},
                         {"name": "JUSTIN",
                          "image_url": "https://seethefullpicture.ca/wp-content/uploads/2019/06/Alcon_SeeTheFullPicture_Website_1901x11252.jpg"}]}
-    # Database location
-    database = "/Users/riceboy/RiceBoy Documents/UTSC Course Tree/UtscCourses.db"
     # Create the db connection
-    connection = createConnection(database)
+    connection = createConnection()
     # Get the prereqs for the course
     prereqsD = getPrereqs(course, connection)
     # String return var
@@ -68,10 +66,8 @@ def prereqData(course):
     pre = {"name": course,
            "image_url": "https://seethefullpicture.ca/wp-content/uploads/2019/06/Alcon_SeeTheFullPicture_Website_1901x11252.jpg",
            "children": []}
-    # Database location
-    database = "/Users/riceboy/RiceBoy Documents/UTSC Course Tree/UtscCourses.db"
     # Create the db connection
-    connection = createConnection(database)
+    connection = createConnection()
     # Get the prereqs for the course
     prereqsD = getPrereqs(course, connection)
 
@@ -106,11 +102,8 @@ def parsePrereqs(prereqs):
 
 def courseInfo(course):
     info = {}
-    # Connect to the database
-    # Database location
-    database = "/Users/riceboy/RiceBoy Documents/UTSC Course Tree/UtscCourses.db"
     # Create the db connection
-    connection = createConnection(database)
+    connection = createConnection()
 
     with connection:
         courseInformation = getInformation(connection, course)
@@ -135,10 +128,8 @@ def courseDirectory():
     subDir = {}
     courses = {}
     idCounter = 1
-    # Database location
-    database = "/Users/riceboy/RiceBoy Documents/UTSC Course Tree/UtscCourses.db"
     # Create the db connection
-    connection = createConnection(database)
+    connection = createConnection()
     # Get the main directory to start
     directory = getDirectory(connection, 0, "")
     # Run a loop to get the sub directory
@@ -184,10 +175,8 @@ def getAllCourses():
     """
     This method will return a list of all the courses
     """
-    # Database location
-    database = "/Users/riceboy/RiceBoy Documents/UTSC Course Tree/UtscCourses.db"
     # Create the db connection
-    connection = createConnection(database)
+    connection = createConnection()
     # Get the list of all the courses
     directory = getDirectory(connection, 2, "")
     # Create the list of dictionaries with the courses
@@ -207,10 +196,8 @@ def test():
     """
     This function is designed to look through the database and find all the prereqs for the desired course
     """
-    # Database location
-    database = "/Users/riceboy/RiceBoy Documents/UTSC Course Tree/UtscCourses.db"
     # Create the db connection
-    connection = createConnection(database)
+    connection = createConnection()
     # Get the prereqs for the course
     prereqsD = searchPre(connection, "ANTD05H3")
     breakdown = []
@@ -229,4 +216,154 @@ def test():
     print(breakdown)
 
 
-test()
+def generatePrereqCode():
+    # Create the db connection
+    connection = createConnection()
+    # Get the prereq columns
+    prereqCols = getPrereqColumn(connection)
+    # Loop through each row and generate the codes
+    for prereq in prereqCols:
+        # If no prereqs
+        if prereq[1] == "N/A":
+            updatePrereqCode(connection, ("0", prereq[0]))
+        elif len(prereq[1]) == 8:
+            # Find the course ID and insert it
+            updatePrereqCode(connection, (getCourseID(connection, prereq[1]), prereq[0]))
+        # Simple case with just AND or OR (no brackets or anything)
+        elif (not bool(re.search(r'[\]\[(),.]', prereq[1]))) and re.search(r'[A-Z]{4}[0-9]{2}[A-Z][0-9]', prereq[1]):
+            code = ""
+            # IF to see if dealing with & or |
+            if prereq[1].count("and") > 0 and prereq[1].count("or") == 0:
+                courses = prereq[1].split(" and ")
+                for course in courses:
+                    code += getCourseID(connection, course.strip()) + "&"
+            elif prereq[1].count("or") > 0 and prereq[1].count("and") == 0:
+                courses = prereq[1].split(" or ")
+                for course in courses:
+                    code += getCourseID(connection, course.strip()) + "|"
+            # ELSE CASE WHEN YOU HAVE AND&OR NEED TO FINISH FORMATTER FIRST THOUGH TO REMOVE [] WHEN UNNECESSARY
+            # Insert the code
+            updatePrereqCode(connection, (code[:-1], prereq[0]))
+        # "Any #.0 Credits" case
+        elif re.match(r'[Any\s\d.\d\sCredits.?]', prereq[1]) and len(prereq[1]) <= 16:
+            # Insert the code
+            updatePrereqCode(connection, (prereq[1], prereq[0]))
+        # Case where there is no course specified (just plain text)
+        elif not bool(re.search(r'[A-Z]{4}[0-9]{2}[A-Z][0-9]', prereq[1])):
+            updatePrereqCode(connection, (prereq[1].replace('[', '').replace(']', ''), prereq[0]))
+        # Co-op case just put 0
+        elif bool(re.search(r'COP[A-Z][0-9]{2}[A-Z][0-9]', prereq[1])):
+            # Insert the code
+            updatePrereqCode(connection, ("0", prereq[0]))
+        else:
+            # Insert the code
+            updatePrereqCode(connection, ("-", prereq[0]))
+
+    # End the connection
+    endConnection(connection)
+
+
+def removeOld():
+    """
+    This function will remove all the courses that no longer exist
+    """
+    # Create the db connection
+    connection = createConnection()
+    # Get the prereq columns
+    prereqCols = getPrereqColumn(connection)
+    # Lop through the list and start updating
+    for prereq in prereqCols:
+        temp = ""
+        flag = False
+        temp = prereq[1]
+        # Check to see if there are any courses that no longer exist
+        counter = temp.count("/(")
+        if counter > 0:
+            flag = True
+            # Run a loop to start splicing/removing
+            while counter > 0:
+                oldIndex = temp.index("/(")
+                newPrereq = temp[:oldIndex] + temp[oldIndex+12:]
+                temp = newPrereq
+                counter -= 1
+        # Additional check if necessary
+        extraCounter = temp.count("(")
+        if extraCounter > 0:
+            flag = True
+            # Run a loop to start splicing/removing
+            while extraCounter > 0:
+                oldIndex = temp.index("(")
+                newPrereq = temp[:oldIndex] + temp[oldIndex + 11:]
+                temp = newPrereq
+                extraCounter -= 1
+        if flag:
+            # Update with the new prereq
+            updatePrereq(connection, (temp, prereq[0]))
+
+
+def formatter():
+    # Create the db connection
+    connection = createConnection()
+    # Get the prereq columns
+    prereqCols = getPrereqColumn(connection)
+    # Lop through the list and start updating
+    for prereq in prereqCols:
+        temp = prereq[1]
+        flag = False
+        # Make sure everything is formatted properly
+        courses = re.findall(r'[A-Z]{4}[0-9]{2}[A-Z][0-9]', temp)
+        if len(courses) == 1 and len(temp) <= 20:
+            temp = temp[:8]
+            flag = True
+        # Get rid of 'or equivalent'
+        equivCounter = temp.count("or equivalent")
+        if equivCounter > 0:
+            flag = True
+            index = temp.index("or equivalent")
+            while equivCounter > 0:
+                # Remove it
+                temp = temp[:index] + temp[index+14:]
+                equivCounter -= 1
+            # Special case
+            if prereq[0] == 671:
+                # Remove it
+                temp = temp[:len(prereq[1])-14]
+
+        if flag:
+            # Update the prereq
+            updatePrereq(connection, (temp, prereq[0]))
+
+
+# REMOVE THIS WHEN DONE
+def specialCases():
+    # Create the db connection
+    connection = createConnection()
+    # Get the prereq columns
+    special = getSpecialCases(connection, "-")
+    for case in special:
+        print(case)
+
+
+#removeOld()
+#formatter()
+#generatePrereqCode()
+#specialCases()
+
+def unlockedCourses(prereq):
+    """
+    This function will return a formatted list of all the courses that has the selected course as a prereq
+    """
+    # Create the db connection
+    connection = createConnection()
+    # Get the unlocked courses
+    unlocked = getUnlocked(connection, prereq)
+    # Loop through the return
+    result = {"A": [], "B": [], "C": [], "D": []}
+    for course in unlocked:
+        item = (str(course).replace("'", "").replace(",", "").replace("(", "").replace(")", ""))
+        result[item[3]].append(item)
+
+    print(result)
+
+
+unlockedCourses("IDSA01H3")
